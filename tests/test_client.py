@@ -11,13 +11,14 @@ def reset_singleton():
     client_module._client = None
 
 
-def test_get_client_creates_workspace_client_with_correct_host():
+def test_get_client_creates_workspace_client_with_correct_params():
     with patch("databricks_connector.client.WorkspaceClient") as MockClient:
         mock_instance = MagicMock()
         MockClient.return_value = mock_instance
         result = client_module.get_client()
         MockClient.assert_called_once_with(
-            host="https://dbc-6f0786a7-8ba5.cloud.databricks.com"
+            host="https://dbc-6f0786a7-8ba5.cloud.databricks.com",
+            auth_type="external-browser",
         )
         assert result is mock_instance
 

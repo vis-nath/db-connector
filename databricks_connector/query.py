@@ -42,7 +42,7 @@ def query(
 
     Args:
         sql: SQL query string.
-        cache_key: If provided, check/write CSV cache at ~/.databricks_connector/cache/.
+        cache_key: If provided, check/write pickle cache at ~/.databricks_connector/cache/.
         cache_ttl_hours: Max age of cached result in hours. 0 disables cache reads.
 
     Returns:

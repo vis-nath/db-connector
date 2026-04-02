@@ -1,4 +1,5 @@
 import os
+import pickle
 import time
 from datetime import datetime
 from pathlib import Path
@@ -21,7 +22,7 @@ def _cache_path(cache_key: str) -> Path:
     """Return the cache file path for a given key (Mexico City date suffix)."""
     tz = pytz.timezone("America/Mexico_City")
     date_str = datetime.now(tz).strftime("%Y-%m-%d")
-    return CACHE_DIR / f"{cache_key}_{date_str}.csv"
+    return CACHE_DIR / f"{cache_key}_{date_str}.pkl"
 
 
 def read_cache(cache_key: str, ttl_hours: float) -> pd.DataFrame | None:
@@ -35,13 +36,15 @@ def read_cache(cache_key: str, ttl_hours: float) -> pd.DataFrame | None:
     if age_seconds > ttl_hours * 3600:
         return None
     try:
-        return pd.read_csv(path)
+        with open(path, "rb") as f:
+            return pickle.load(f)
     except Exception:
         return None
 
 
 def write_cache(cache_key: str, df: pd.DataFrame) -> None:
-    """Write DataFrame to cache as CSV."""
+    """Write DataFrame to cache as pickle (preserves dtypes)."""
     _ensure_cache_dir()
     path = _cache_path(cache_key)
-    df.to_csv(path, index=False)
+    with open(path, "wb") as f:
+        pickle.dump(df, f)

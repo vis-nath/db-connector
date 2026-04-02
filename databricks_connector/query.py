@@ -21,8 +21,14 @@ def _load_warehouse_id() -> str:
     if warehouse_id:
         return warehouse_id
     config_path = Path(__file__).parent.parent / "config.yaml"
-    with open(config_path) as f:
-        config = yaml.safe_load(f)
+    try:
+        with open(config_path) as f:
+            config = yaml.safe_load(f)
+    except FileNotFoundError:
+        raise ValueError(
+            f"config.yaml not found at {config_path}. "
+            "Set DATABRICKS_WAREHOUSE_ID in .env or create config.yaml."
+        )
     warehouse_id = config.get("databricks", {}).get("warehouse_id", "").strip()
     if not warehouse_id:
         raise ValueError(
@@ -34,7 +40,7 @@ def _load_warehouse_id() -> str:
 
 def query(
     sql: str,
-    cache_key: str = None,
+    cache_key: str | None = None,
     cache_ttl_hours: float = 0,
 ) -> pd.DataFrame:
     """

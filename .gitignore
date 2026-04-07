@@ -1,7 +1,6 @@
 .env
 
-# Databricks local credentials — never commit
-~/.databricks_connector/
+# Databricks local credentials — never commit (session/config stored in ~/.databricks_connector/)
 config.json
 session.json
 auth.json

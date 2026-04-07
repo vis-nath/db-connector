@@ -1,55 +1,76 @@
-# databricks_connector
+# db-connector
 
-General-purpose Databricks SQL connector for local Python analysis.
-Authenticates via U2M OAuth (browser login once, silent refresh after).
-Returns `pandas.DataFrame`. Optional pickle cache.
+Query Databricks SQL from Python using a browser session — no API tokens or OAuth required.
 
-## Setup
+Authenticates via SSO browser login (once). Returns `pandas.DataFrame`.
 
-1. Install dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
+---
 
-2. Set your SQL Warehouse ID in `config.yaml`:
-   ```yaml
-   databricks:
-     host: https://dbc-6f0786a7-8ba5.cloud.databricks.com
-     warehouse_id: YOUR_WAREHOUSE_ID
-   ```
-   Get it from: Databricks workspace → SQL Warehouses → your warehouse → Connection Details → HTTP Path (last segment).
+## Prerequisites
 
-   Or set `DATABRICKS_WAREHOUSE_ID` in `.env`.
+- WSL2 on Windows 11 (WSLg required for browser window)
+- Python 3.12
+- Git + SSH key configured for GitHub
 
-3. On first use, a browser window opens for Databricks OAuth login.
-   Tokens are cached at `~/.databricks/token-cache.json` — subsequent runs are silent.
+---
+
+## Installation
+
+```bash
+git clone git@github.com:vis-nath/db-connector.git ~/projects/databricks_connector
+cd ~/projects/databricks_connector
+pip install -r requirements.txt --break-system-packages
+playwright install chromium
+```
+
+---
+
+## Setup (first time only)
+
+You need a `~/.databricks_connector/config.json` with your workspace's host and warehouse ID.
+Get these values from your team's internal setup guide.
+
+Once you have `config.json`, run:
+
+```bash
+python3 ~/projects/databricks_connector/setup_auth.py
+```
+
+A browser window will open. Log in with your company SSO account.
+When the workspace is fully loaded, **come back to the terminal and press Enter**.
+
+---
 
 ## Usage
 
 ```python
 from databricks_connector import query
 
-# Simple query
-df = query("SELECT * FROM catalog.schema.table LIMIT 100")
-
-# With cache (skip query if result is <6 hours old)
-df = query("SELECT ...", cache_key="my_query", cache_ttl_hours=6)
+df = query("SELECT * FROM my_catalog.my_schema.my_table LIMIT 100")
+print(df.shape)
+print(df.head())
 ```
 
-## Future: Job Execution
+`query()` returns a `pandas.DataFrame`. The warehouse starts automatically if stopped.
 
-`get_client()` returns the raw `WorkspaceClient` for jobs/notebooks:
+---
 
-```python
-from databricks_connector import get_client
-w = get_client()
-w.jobs.run_now(job_id=123)
+## Session expiry
+
+Sessions last 8–24 hours. When a query raises `AuthRequiredError`, just re-login:
+
+```bash
+python3 ~/projects/databricks_connector/setup_auth.py
 ```
 
-## Adding to Another Project
+No reinstall needed.
 
-```python
-import sys
-sys.path.insert(0, "/home/natanahelbaruch/projects/databricks_connector")
-from databricks_connector import query
-```
+---
+
+## How it works
+
+Uses a Playwright headless browser with saved session cookies to call Databricks'
+internal web API (`/ajax-api/2.0/sql/statements`) — the same endpoint the SQL editor uses.
+No Bearer tokens required.
+
+See `databricks_connector/browser_query.py` for implementation details.

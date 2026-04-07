@@ -690,6 +690,107 @@ Restart Claude Code and type `/databricks-setup` — it should activate the skil
 
 ---
 
+## Task 7: Full verification — nothing is broken
+
+**Files:** none — read-only checks only
+
+This task runs after all code changes and GitHub push are complete. It confirms the connector still works end-to-end and the repo has no sensitive data.
+
+- [ ] **Step 1: Run the existing unit test suite**
+
+```bash
+cd /home/natanahelbaruch/projects/databricks_connector
+python3 -m pytest tests/ -v 2>&1
+```
+
+Expected: all tests pass (some may be skipped if they require live Databricks — that is fine).
+Any FAILED result must be investigated and fixed before continuing.
+
+- [ ] **Step 2: Verify config.json error fires correctly**
+
+```bash
+mv ~/.databricks_connector/config.json ~/.databricks_connector/config.json.bak
+python3 -c "
+import sys; sys.path.insert(0, '.')
+from databricks_connector import query
+try:
+    query('SELECT 1')
+    print('FAIL — should have raised RuntimeError')
+except RuntimeError as e:
+    print('PASS — config guard working')
+    print(e)
+"
+mv ~/.databricks_connector/config.json.bak ~/.databricks_connector/config.json
+```
+
+Expected output contains `PASS`.
+
+- [ ] **Step 3: Verify AuthRequiredError fires correctly when no session**
+
+```bash
+mv ~/.databricks_connector/session.json ~/.databricks_connector/session.json.bak 2>/dev/null || true
+python3 -c "
+import sys; sys.path.insert(0, '.')
+from databricks_connector import query, AuthRequiredError
+try:
+    query('SELECT 1')
+    print('FAIL — should have raised AuthRequiredError')
+except AuthRequiredError as e:
+    print('PASS — session guard working')
+except Exception as e:
+    print('FAIL — wrong exception:', type(e).__name__, e)
+"
+mv ~/.databricks_connector/session.json.bak ~/.databricks_connector/session.json 2>/dev/null || true
+```
+
+Expected output contains `PASS`.
+
+- [ ] **Step 4: Live end-to-end query test**
+
+```bash
+python3 -c "
+import sys; sys.path.insert(0, '.')
+from databricks_connector import query
+df = query('SELECT * FROM prd_refined.salesforce_latam_refined.vehicle LIMIT 10')
+assert df.shape[0] == 10, f'Expected 10 rows, got {df.shape[0]}'
+assert df.shape[1] > 0, 'Expected columns'
+print(f'PASS — live query returned {df.shape[0]} rows x {df.shape[1]} cols')
+print(df.columns[:5].tolist(), '...')
+" 2>&1
+```
+
+Expected: `PASS — live query returned 10 rows x 176 cols`
+
+- [ ] **Step 5: Verify no sensitive data in the repo**
+
+```bash
+grep -r "dbc-6f0786a7\|3de9aee76c2f16f1\|424412b3fb27e042" \
+  --include="*.py" --include="*.yaml" --include="*.md" --include="*.json" \
+  /home/natanahelbaruch/projects/databricks_connector/ \
+  2>/dev/null | grep -v __pycache__ | grep -v ".git/"
+```
+
+Expected: **no output**. Any match means a sensitive value leaked into a tracked file — fix before proceeding.
+
+- [ ] **Step 6: Verify .gitignore protects local credential files**
+
+```bash
+cd /home/natanahelbaruch/projects/databricks_connector
+git status --short | grep -E "config\.json|session\.json|auth\.json"
+```
+
+Expected: **no output** (those files are untracked and ignored).
+
+- [ ] **Step 7: Verify skill file is in place and has correct frontmatter**
+
+```bash
+head -10 ~/.claude/plugins/skills/databricks-setup.md
+```
+
+Expected: starts with `---` and contains `name: databricks-setup`.
+
+---
+
 ## Self-Review
 
 **Spec coverage check:**

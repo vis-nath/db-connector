@@ -88,7 +88,7 @@ async def _run(sql: str, warehouse_id: str) -> pd.DataFrame:
             await page.goto(get_host(), wait_until="domcontentloaded", timeout=30_000)
             await page.wait_for_load_state("networkidle", timeout=30_000)
         except PlaywrightTimeout:
-            pass
+            pass  # intentional — workspace may still accept fetch() calls after navigation timeout
 
         result = await page.evaluate(_JS_QUERY, {"sql": sql, "warehouse_id": warehouse_id})
 
@@ -106,7 +106,7 @@ async def _run(sql: str, warehouse_id: str) -> pd.DataFrame:
     if http_status in (401, 403) and "CSRF" not in str(body):
         raise AuthRequiredError(
             "Session expired.\n"
-            "Run:  python3 /home/natanahelbaruch/projects/databricks_connector/setup_auth.py"
+            "Run:  python3 ~/projects/databricks_connector/setup_auth.py"
         )
     if http_status not in (200, 201):
         raise DatabricksQueryError(f"HTTP {http_status}: {body}")

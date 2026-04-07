@@ -32,20 +32,12 @@ def _load_config() -> dict:
     return cfg
 
 
-def _get_host() -> str:
+def get_host() -> str:
     return _load_config()["host"]
 
 
-def _get_warehouse_id() -> str:
-    return _load_config()["warehouse_id"]
-
-
-def get_host() -> str:
-    return _get_host()
-
-
 def get_warehouse_id() -> str:
-    return _get_warehouse_id()
+    return _load_config()["warehouse_id"]
 
 
 class AuthRequiredError(Exception):

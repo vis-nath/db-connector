@@ -18,3 +18,4 @@ dist/
 .coverage
 htmlcov/
 *.log
+test.py

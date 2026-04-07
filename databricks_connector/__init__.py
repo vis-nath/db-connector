@@ -1,4 +1,4 @@
-from .query import query, DatabricksQueryError
-from .client import get_client
+from .browser_query import query, DatabricksQueryError
+from .browser_auth import AuthRequiredError
 
-__all__ = ["query", "get_client", "DatabricksQueryError"]
+__all__ = ["query", "DatabricksQueryError", "AuthRequiredError"]

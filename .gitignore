@@ -1,4 +1,11 @@
 .env
+
+# Databricks local credentials — never commit
+~/.databricks_connector/
+config.json
+session.json
+auth.json
+
 .venv/
 __pycache__/
 *.pyc

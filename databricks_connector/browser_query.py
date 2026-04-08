@@ -70,6 +70,34 @@ async (args) => {
 }
 """
 
+# ── Error classification helpers ──────────────────────────────────────────────
+
+def _classify_http_error(http_status: int, body: dict) -> None:
+    """Raise the appropriate exception for a non-2xx HTTP response."""
+    if http_status in (401, 403):
+        # If body has any API structure (error_code key present), it's a
+        # Databricks API error — not a session expiry.
+        if "error_code" in body:
+            msg = body.get("message") or body.get("error_code") or str(body)
+            raise DatabricksQueryError(f"Permission denied: {msg}")
+        raise AuthRequiredError(
+            "Session expired.\n"
+            "Run:  python3 ~/projects/databricks_connector/setup_auth.py"
+        )
+    raise DatabricksQueryError(f"HTTP {http_status}: {body}")
+
+
+def _classify_query_state(body: dict) -> None:
+    """Raise DatabricksQueryError for any non-SUCCEEDED query state."""
+    state = body.get("status", {}).get("state", "UNKNOWN")
+    error_info = body.get("status", {}).get("error", {})
+    if isinstance(error_info, dict):
+        msg = error_info.get("message") or error_info.get("error_code") or str(error_info)
+    else:
+        msg = str(error_info) or str(body)
+    raise DatabricksQueryError(f"Query {state}: {msg or '(no details)'}")
+
+
 # ── async core ────────────────────────────────────────────────────────────────
 
 async def _run(sql: str, warehouse_id: str) -> pd.DataFrame:
@@ -103,18 +131,12 @@ async def _run(sql: str, warehouse_id: str) -> pd.DataFrame:
     http_status = result.get("httpStatus")
     body = result.get("body") or {}
 
-    if http_status in (401, 403) and "CSRF" not in str(body):
-        raise AuthRequiredError(
-            "Session expired.\n"
-            "Run:  python3 ~/projects/databricks_connector/setup_auth.py"
-        )
     if http_status not in (200, 201):
-        raise DatabricksQueryError(f"HTTP {http_status}: {body}")
+        _classify_http_error(http_status, body)
 
-    state = body.get("status", {}).get("state")
+    state = (body.get("status") or {}).get("state")
     if state != "SUCCEEDED":
-        error_info = body.get("status", {}).get("error", body)
-        raise DatabricksQueryError(f"Query {state}: {error_info}")
+        _classify_query_state(body)
 
     # ── Build DataFrame ───────────────────────────────────────────────────────
     cols = [c["name"] for c in body["manifest"]["schema"]["columns"]]

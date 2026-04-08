@@ -5,9 +5,9 @@ Run from your terminal:
 
     python3 setup_auth.py
 
-Chromium opens. Log in completely. When you see the Databricks workspace,
-come back to this terminal and press Enter. The session is then saved and
-the browser closes.
+Chromium opens. Log in with your @kavak.com account. The browser navigates
+to the SQL Warehouses page — once it lands there, the session is saved
+and the browser closes automatically. No terminal interaction needed.
 """
 
 import asyncio
@@ -19,6 +19,10 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from databricks_connector.browser_auth import SESSION_FILE, get_host
 
+LOGIN_URL = "https://dbc-6f0786a7-8ba5.cloud.databricks.com/sql/warehouses"
+SUCCESS_URL_PATTERN = "**/sql-warehouses**"
+LOGIN_TIMEOUT_MS = 300_000  # 5 minutes — enough time for SSO
+
 
 async def _do_login():
     from playwright.async_api import async_playwright
@@ -26,10 +30,9 @@ async def _do_login():
     print("\n" + "=" * 60)
     print("DATABRICKS SESSION SETUP")
     print("=" * 60)
-    print("\nChromium will open on your Windows desktop.")
-    print("1. Log in completely with your @kavak.com SSO account.")
-    print("2. Wait until the Databricks WORKSPACE is fully visible.")
-    print("3. Come back here and press Enter.\n")
+    print("\nSe abrirá una ventana de Chrome en tu pantalla.")
+    print("Inicia sesión con tu correo @kavak.com.")
+    print("La sesión se guardará automáticamente — no necesitas volver a esta terminal.\n")
 
     async with async_playwright() as p:
         browser = await p.chromium.launch(
@@ -39,17 +42,15 @@ async def _do_login():
         context = await browser.new_context()
         page = await context.new_page()
 
-        await page.goto(get_host(), wait_until="domcontentloaded")
-        print("Browser opened. Log in now...\n")
+        await page.goto(LOGIN_URL, wait_until="domcontentloaded")
+        print("Navegador abierto. Inicia sesión ahora...")
+        print("(El Chrome se cerrará solo cuando el login sea exitoso)\n")
 
-        # Wait for the user to signal they are done — no automatic close
-        await asyncio.get_event_loop().run_in_executor(
-            None,
-            lambda: input(">>> Press Enter AFTER you are fully logged into the workspace: ")
-        )
+        # Wait until SSO redirects back to the SQL warehouses page
+        await page.wait_for_url(SUCCESS_URL_PATTERN, timeout=LOGIN_TIMEOUT_MS)
 
-        print("\nSaving session...")
-        await asyncio.sleep(2)  # brief pause so any final cookies settle
+        print("\nLogin detectado. Guardando sesión...")
+        await asyncio.sleep(2)  # let any final cookies settle
 
         SESSION_FILE.parent.mkdir(parents=True, exist_ok=True)
         await context.storage_state(path=str(SESSION_FILE))

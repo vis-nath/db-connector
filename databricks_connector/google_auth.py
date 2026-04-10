@@ -10,7 +10,6 @@ Flow:
 import asyncio
 import base64
 import hashlib
-import json
 import secrets
 import socket
 import time
@@ -21,7 +20,6 @@ import requests
 from .auth import (
     AuthRequiredError,
     get_host,
-    get_warehouse_id,
     get_google_session_file,
     read_token_cache,
     write_token_cache,
@@ -165,10 +163,10 @@ async def _headless_oauth(
     code_holder: dict = {}
 
     async def _intercept(route):
-        url = route.request.url
-        parsed = urllib.parse.urlparse(url)
-        params = urllib.parse.parse_qs(parsed.query)
-        if "code" in params:
+        params = urllib.parse.parse_qs(urllib.parse.urlparse(route.request.url).query)
+        if "error" in params:
+            code_holder["error"] = params["error"][0]
+        elif "code" in params:
             code_holder["code"] = params["code"][0]
         await route.fulfill(
             status=200,
@@ -197,6 +195,11 @@ async def _headless_oauth(
         await context.storage_state(path=google_session_file)
         await browser.close()
 
+    if code_holder.get("error"):
+        raise AuthRequiredError(
+            f"OAuth rechazado: {code_holder['error']}.\n"
+            "Ejecuta: python3 ~/projects/databricks_connector/setup_auth.py"
+        )
     if not code_holder.get("code"):
         raise AuthRequiredError(
             "OAuth headless flow timed out — las cookies de Google pueden haber expirado.\n"
@@ -226,7 +229,9 @@ async def _visible_browser_login(auth_url: str, redirect_uri: str, port: int) ->
 
     async def _intercept(route):
         params = urllib.parse.parse_qs(urllib.parse.urlparse(route.request.url).query)
-        if "code" in params:
+        if "error" in params:
+            code_holder["error"] = params["error"][0]
+        elif "code" in params:
             code_holder["code"] = params["code"][0]
         await route.fulfill(
             status=200,
@@ -252,9 +257,15 @@ async def _visible_browser_login(auth_url: str, redirect_uri: str, port: int) ->
 
         # Save new Google cookies for future headless use
         from .auth import GOOGLE_SESSION_FILE
+        GOOGLE_SESSION_FILE.parent.mkdir(parents=True, exist_ok=True)
         await context.storage_state(path=str(GOOGLE_SESSION_FILE))
         await browser.close()
 
+    if code_holder.get("error"):
+        raise AuthRequiredError(
+            f"OAuth rechazado: {code_holder['error']}.\n"
+            "Ejecuta: python3 ~/projects/databricks_connector/setup_auth.py"
+        )
     if not code_holder.get("code"):
         raise AuthRequiredError("Login cancelado o timeout. Vuelve a intentarlo.")
 

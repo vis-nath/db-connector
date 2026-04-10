@@ -1,20 +1,18 @@
 """
-Config loading, session file paths, and token cache I/O.
+Config loading for Databricks connector.
 
-No business logic — pure file reading/writing.
-Config written by the databricks-setup Claude Code skill.
+Reads connection settings from ~/.databricks_connector/config.json.
+Auth tokens are managed entirely by the Databricks SDK (external-browser OAuth).
 """
 
 import json
 from pathlib import Path
 
 _CONFIG_FILE = Path.home() / ".databricks_connector" / "config.json"
-GOOGLE_SESSION_FILE = Path.home() / ".databricks_connector" / "google_session.json"
-TOKEN_CACHE_FILE = Path.home() / ".databricks_connector" / "token-cache.json"
 
 
 class AuthRequiredError(Exception):
-    """Google session or OAuth tokens missing/expired. Run setup_auth.py."""
+    """Databricks auth failed or tokens expired. Run setup_auth.py."""
 
 
 def _load_config() -> dict:
@@ -50,32 +48,3 @@ def get_warehouse_id() -> str:
             "Verifica config.json."
         )
     return warehouse_id
-
-
-def get_google_session_file() -> Path:
-    """Return path to Google session file, or raise AuthRequiredError if missing."""
-    if not GOOGLE_SESSION_FILE.exists():
-        raise AuthRequiredError(
-            "No hay sesión de Google guardada.\n"
-            "Ejecuta: python3 ~/projects/databricks_connector/setup_auth.py"
-        )
-    return GOOGLE_SESSION_FILE
-
-
-def read_token_cache() -> dict | None:
-    """Return cached token dict or None if file is missing or unreadable."""
-    if not TOKEN_CACHE_FILE.exists():
-        return None
-    try:
-        with open(TOKEN_CACHE_FILE) as f:
-            return json.load(f)
-    except Exception:
-        return None
-
-
-def write_token_cache(data: dict) -> None:
-    """Write token dict to cache file (creates parent dir if needed)."""
-    TOKEN_CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
-    with open(TOKEN_CACHE_FILE, "w") as f:
-        json.dump(data, f)
-    TOKEN_CACHE_FILE.chmod(0o600)

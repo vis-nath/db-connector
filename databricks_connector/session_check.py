@@ -1,28 +1,25 @@
-# databricks_connector/session_check.py
 """
-Check whether the saved Databricks OAuth token is still valid.
-No network calls — purely checks expiry from token-cache.json.
+Check whether the Databricks SDK token cache has credentials for our workspace.
+No network calls — purely checks file presence and content.
 """
 
-import time
-from .auth import read_token_cache
+import json
+from pathlib import Path
 
-_BUFFER_SECS = 60  # treat token as expired this many seconds before actual expiry
+_SDK_TOKEN_CACHE = Path.home() / ".databricks" / "token-cache.json"
 
 
 def check_session() -> bool:
     """
-    Return True if the cached OAuth token is present and not expired.
-    Returns False if missing, expired, or unreadable.
-
-    Example:
-        from databricks_connector import check_session
-        if not check_session():
-            print("Token expired — run setup_auth.py")
+    Return True if the Databricks SDK token cache exists and is non-empty.
+    Returns False if the file is missing, empty, or unreadable.
+    False means setup_auth.py needs to be run.
     """
-    cache = read_token_cache()
-    if not cache:
+    if not _SDK_TOKEN_CACHE.exists():
         return False
-    expires_at = cache.get("expires_at", 0)
-    access_token = cache.get("access_token")
-    return bool(access_token and expires_at - time.time() > _BUFFER_SECS)
+    try:
+        with open(_SDK_TOKEN_CACHE) as f:
+            data = json.load(f)
+        return bool(data)
+    except Exception:
+        return False

@@ -7,22 +7,17 @@ Flow:
                           falls back to visible browser if Google cookies have expired
 """
 
-import asyncio
 import base64
 import hashlib
 import json
 import secrets
 import socket
 import time
-import urllib.parse
 
 import requests
 
 from .auth import (
-    AuthRequiredError,
     get_host,
-    get_warehouse_id,
-    get_google_session_file,
     read_token_cache,
     write_token_cache,
 )
@@ -70,11 +65,13 @@ def _get_oidc_endpoints(host: str) -> dict:
 def _save_tokens(token_response: dict) -> None:
     """Write token response dict to cache (computes expires_at from expires_in)."""
     expires_in = token_response.get("expires_in", 3600)
-    write_token_cache({
+    cache_entry = {
         "access_token": token_response["access_token"],
-        "refresh_token": token_response.get("refresh_token", ""),
         "expires_at": time.time() + expires_in,
-    })
+    }
+    if token_response.get("refresh_token"):
+        cache_entry["refresh_token"] = token_response["refresh_token"]
+    write_token_cache(cache_entry)
 
 
 def _do_refresh(token_endpoint: str, refresh_token: str) -> dict | None:
@@ -120,7 +117,7 @@ def get_valid_token() -> str | None:
             if new_tokens:
                 _save_tokens(new_tokens)
                 return new_tokens["access_token"]
-        except Exception:
-            pass  # network error or invalid refresh token — fall through to None
+        except (requests.RequestException, OSError, ValueError, KeyError):
+            pass  # network error, disk I/O, malformed JSON, or missing key in response
 
     return None

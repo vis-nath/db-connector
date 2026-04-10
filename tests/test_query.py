@@ -11,6 +11,8 @@ def _make_cursor(rows, columns):
     cursor = MagicMock()
     cursor.fetchall.return_value = rows
     cursor.description = [(col, None, None, None, None, None, None) for col in columns]
+    cursor.__enter__ = MagicMock(return_value=cursor)
+    cursor.__exit__ = MagicMock(return_value=False)
     return cursor
 
 
@@ -53,14 +55,13 @@ def test_query_triggers_reauth_when_no_token():
 
 
 def test_query_raises_auth_error_when_reauth_fails():
-    with patch("databricks_connector.query.get_valid_token", return_value=None), \
-         patch("databricks_connector.query.reauth"), \
+    with patch("databricks_connector.query.get_valid_token", side_effect=[None, None]), \
+         patch("databricks_connector.query.reauth") as mock_reauth, \
          patch("databricks_connector.query.get_host", return_value="h"), \
          patch("databricks_connector.query.get_http_path", return_value="/p"):
-        # Both token attempts return None → AuthRequiredError
-        with patch("databricks_connector.query.get_valid_token", return_value=None):
-            with pytest.raises(AuthRequiredError):
-                query("SELECT 1")
+        with pytest.raises(AuthRequiredError):
+            query("SELECT 1")
+    mock_reauth.assert_called_once()
 
 
 def test_query_retries_once_on_server_auth_rejection():

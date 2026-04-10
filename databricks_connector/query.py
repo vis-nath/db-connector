@@ -19,7 +19,12 @@ class DatabricksQueryError(Exception):
     pass
 
 
-_AUTH_KEYWORDS = ("401", "403", "unauthorized", "unauthenticated", "invalid token")
+_AUTH_KEYWORDS = (
+    "401", "403",
+    "unauthorized", "unauthenticated",
+    "invalid token", "token expired", "token is expired",
+    "access denied", "permission_denied",
+)
 
 
 def _is_auth_error(exc: _SqlError) -> bool:
@@ -34,11 +39,11 @@ def _execute(host: str, http_path: str, access_token: str, sql_query: str) -> pd
         http_path=http_path,
         access_token=access_token,
     ) as conn:
-        cursor = conn.cursor()
-        cursor.execute(sql_query)
-        result = cursor.fetchall()
-        columns = [desc[0] for desc in cursor.description]
-        return pd.DataFrame(result, columns=columns)
+        with conn.cursor() as cursor:
+            cursor.execute(sql_query)
+            result = cursor.fetchall()
+            columns = [desc[0] for desc in cursor.description]
+            return pd.DataFrame(result, columns=columns)
 
 
 def query(sql_query: str, http_path: str | None = None) -> pd.DataFrame:

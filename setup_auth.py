@@ -88,6 +88,9 @@ def main():
         print("\nCancelled.")
         sys.exit(1)
 
+    # Secure config.json permissions
+    config_file.chmod(0o600)
+
     # Bootstrap first OAuth token using the freshly saved Google cookies
     print("\nObteniendo token OAuth inicial...")
     try:

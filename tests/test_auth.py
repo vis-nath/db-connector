@@ -29,6 +29,14 @@ def test_get_warehouse_id_derived_from_http_path(config_file):
         assert auth_module.get_warehouse_id() == "abc123"
 
 
+def test_get_warehouse_id_raises_when_http_path_malformed(tmp_path):
+    p = tmp_path / "config.json"
+    p.write_text(json.dumps({"host": "x.com", "http_path": "/"}))
+    with patch.object(auth_module, "_CONFIG_FILE", p):
+        with pytest.raises(RuntimeError, match="warehouse ID"):
+            auth_module.get_warehouse_id()
+
+
 def test_get_host_raises_when_config_missing(tmp_path):
     with patch.object(auth_module, "_CONFIG_FILE", tmp_path / "config.json"):
         with pytest.raises(RuntimeError, match="config.json no encontrado"):
@@ -69,3 +77,4 @@ def test_write_and_read_token_cache(tmp_path):
         result = auth_module.read_token_cache()
     assert result["access_token"] == "tok"
     assert result["refresh_token"] == "ref"
+    assert oct(cache_file.stat().st_mode)[-3:] == "600"

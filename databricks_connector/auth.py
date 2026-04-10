@@ -43,7 +43,13 @@ def get_http_path() -> str:
 
 def get_warehouse_id() -> str:
     """Return warehouse ID derived from http_path (last path segment)."""
-    return get_http_path().rstrip("/").split("/")[-1]
+    warehouse_id = get_http_path().rstrip("/").split("/")[-1]
+    if not warehouse_id:
+        raise RuntimeError(
+            "No se pudo extraer el warehouse ID de http_path. "
+            "Verifica config.json."
+        )
+    return warehouse_id
 
 
 def get_google_session_file() -> Path:

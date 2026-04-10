@@ -7,17 +7,22 @@ Flow:
                           falls back to visible browser if Google cookies have expired
 """
 
+import asyncio
 import base64
 import hashlib
 import json
 import secrets
 import socket
 import time
+import urllib.parse
 
 import requests
 
 from .auth import (
+    AuthRequiredError,
     get_host,
+    get_warehouse_id,
+    get_google_session_file,
     read_token_cache,
     write_token_cache,
 )
@@ -121,3 +126,183 @@ def get_valid_token() -> str | None:
             pass  # network error, disk I/O, malformed JSON, or missing key in response
 
     return None
+
+
+# ── Code exchange ─────────────────────────────────────────────────────────────
+
+def _exchange_code(
+    token_endpoint: str, code: str, verifier: str, redirect_uri: str
+) -> dict:
+    """Exchange authorization code for access + refresh tokens."""
+    resp = requests.post(
+        token_endpoint,
+        data={
+            "grant_type": "authorization_code",
+            "code": code,
+            "code_verifier": verifier,
+            "redirect_uri": redirect_uri,
+            "client_id": _DATABRICKS_CLIENT_ID,
+        },
+        timeout=30,
+    )
+    resp.raise_for_status()
+    return resp.json()
+
+
+# ── Headless OAuth flow ───────────────────────────────────────────────────────
+
+async def _headless_oauth(
+    auth_url: str, redirect_uri: str, port: int, google_session_file: str
+) -> str:
+    """
+    Load Google cookies into headless Chromium, navigate to auth_url, and
+    intercept the OAuth callback via Playwright route interception.
+    Returns the authorization code string.
+    Raises AuthRequiredError on timeout (Google cookies likely expired).
+    """
+    from playwright.async_api import async_playwright
+
+    code_holder: dict = {}
+
+    async def _intercept(route):
+        url = route.request.url
+        parsed = urllib.parse.urlparse(url)
+        params = urllib.parse.parse_qs(parsed.query)
+        if "code" in params:
+            code_holder["code"] = params["code"][0]
+        await route.fulfill(
+            status=200,
+            body="Login exitoso. Puedes cerrar esta ventana.",
+            content_type="text/html",
+        )
+
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(
+            headless=True,
+            args=["--no-sandbox", "--disable-dev-shm-usage"],
+        )
+        context = await browser.new_context(storage_state=google_session_file)
+        await context.route(f"http://localhost:{port}/**", _intercept)
+        page = await context.new_page()
+
+        await page.goto(auth_url, wait_until="domcontentloaded")
+
+        # Poll up to 60 seconds for the callback to be intercepted
+        for _ in range(60):
+            if code_holder.get("code"):
+                break
+            await asyncio.sleep(1)
+
+        # Refresh Google cookies so they stay alive longer
+        await context.storage_state(path=google_session_file)
+        await browser.close()
+
+    if not code_holder.get("code"):
+        raise AuthRequiredError(
+            "OAuth headless flow timed out — las cookies de Google pueden haber expirado.\n"
+            "Ejecuta: python3 ~/projects/databricks_connector/setup_auth.py"
+        )
+
+    return code_holder["code"]
+
+
+# ── Visible browser fallback ──────────────────────────────────────────────────
+
+async def _visible_browser_login(auth_url: str, redirect_uri: str, port: int) -> str:
+    """
+    Open a visible browser for manual Google login when cookies are expired.
+    Returns the authorization code once the user completes login.
+    Raises AuthRequiredError on timeout (5 minutes).
+    """
+    from playwright.async_api import async_playwright
+
+    print("\n" + "=" * 60)
+    print("RE-AUTENTICACIÓN REQUERIDA")
+    print("=" * 60)
+    print("Se abrirá una ventana de Chrome. Inicia sesión con tu cuenta @kavak.com.")
+    print("La ventana se cerrará automáticamente al completar el login.\n")
+
+    code_holder: dict = {}
+
+    async def _intercept(route):
+        params = urllib.parse.parse_qs(urllib.parse.urlparse(route.request.url).query)
+        if "code" in params:
+            code_holder["code"] = params["code"][0]
+        await route.fulfill(
+            status=200,
+            body="Login exitoso. Puedes cerrar esta ventana.",
+            content_type="text/html",
+        )
+
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(
+            headless=False,
+            args=["--no-sandbox", "--disable-dev-shm-usage"],
+        )
+        context = await browser.new_context()
+        await context.route(f"http://localhost:{port}/**", _intercept)
+        page = await context.new_page()
+        await page.goto(auth_url, wait_until="domcontentloaded")
+
+        # Wait up to 5 minutes for manual login
+        for _ in range(300):
+            if code_holder.get("code"):
+                break
+            await asyncio.sleep(1)
+
+        # Save new Google cookies for future headless use
+        from .auth import GOOGLE_SESSION_FILE
+        await context.storage_state(path=str(GOOGLE_SESSION_FILE))
+        await browser.close()
+
+    if not code_holder.get("code"):
+        raise AuthRequiredError("Login cancelado o timeout. Vuelve a intentarlo.")
+
+    print("Login exitoso. Sesión de Google guardada.\n")
+    return code_holder["code"]
+
+
+# ── Public: full re-auth ──────────────────────────────────────────────────────
+
+def reauth() -> None:
+    """
+    Full OAuth re-authentication.
+    1. Tries headless Playwright with saved Google cookies.
+    2. Falls back to visible browser if Google cookies are expired.
+    Saves new tokens to token cache on success.
+    Raises AuthRequiredError only if user cancels the visible browser login.
+    """
+    asyncio.run(_do_reauth())
+
+
+async def _do_reauth() -> None:
+    host = get_host()
+    endpoints = _get_oidc_endpoints(host)
+    verifier, challenge = _generate_pkce()
+    state = secrets.token_urlsafe(16)
+    port = _find_free_port()
+    redirect_uri = f"http://localhost:{port}/callback"
+
+    params = urllib.parse.urlencode({
+        "response_type": "code",
+        "client_id": _DATABRICKS_CLIENT_ID,
+        "redirect_uri": redirect_uri,
+        "scope": "sql offline_access",
+        "state": state,
+        "code_challenge": challenge,
+        "code_challenge_method": "S256",
+    })
+    auth_url = f"{endpoints['authorization_endpoint']}?{params}"
+
+    # Try headless first (uses saved Google cookies)
+    try:
+        google_session = str(get_google_session_file())
+        code = await _headless_oauth(auth_url, redirect_uri, port, google_session)
+    except AuthRequiredError:
+        # Google cookies expired — fall back to visible browser
+        code = await _visible_browser_login(auth_url, redirect_uri, port)
+
+    token_response = _exchange_code(
+        endpoints["token_endpoint"], code, verifier, redirect_uri
+    )
+    _save_tokens(token_response)

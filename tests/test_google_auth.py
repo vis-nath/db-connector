@@ -85,3 +85,61 @@ def test_get_valid_token_refreshes_silently_when_expired(tmp_path):
         token = ga.get_valid_token()
 
     assert token == "new_token"
+
+
+# ── _exchange_code ────────────────────────────────────────────────────────────
+
+import asyncio
+from unittest.mock import AsyncMock, patch, MagicMock
+
+
+def test_exchange_code_returns_token_dict():
+    mock_resp = MagicMock()
+    mock_resp.raise_for_status = MagicMock()
+    mock_resp.json.return_value = {
+        "access_token": "dapi_new",
+        "refresh_token": "new_ref",
+        "expires_in": 3600,
+    }
+    with patch("databricks_connector.google_auth.requests.post", return_value=mock_resp) as mock_post:
+        result = ga._exchange_code(
+            token_endpoint="https://host/oidc/v1/token",
+            code="AUTH_CODE",
+            verifier="VERIFIER",
+            redirect_uri="http://localhost:8888/callback",
+        )
+    mock_post.assert_called_once()
+    call_data = mock_post.call_args[1]["data"]
+    assert call_data["grant_type"] == "authorization_code"
+    assert call_data["code"] == "AUTH_CODE"
+    assert call_data["code_verifier"] == "VERIFIER"
+    assert result["access_token"] == "dapi_new"
+
+
+def test_reauth_calls_headless_then_saves_tokens(tmp_path):
+    import databricks_connector.auth as auth_module
+
+    mock_token_resp = {
+        "access_token": "dapi_headless",
+        "refresh_token": "ref_headless",
+        "expires_in": 3600,
+    }
+    endpoints = {
+        "authorization_endpoint": "https://host/oidc/v1/authorize",
+        "token_endpoint": "https://host/oidc/v1/token",
+    }
+    google_session = tmp_path / "google_session.json"
+    google_session.write_text("{}")
+    token_cache = tmp_path / "token-cache.json"
+
+    with patch.object(auth_module, "GOOGLE_SESSION_FILE", google_session), \
+         patch.object(auth_module, "TOKEN_CACHE_FILE", token_cache), \
+         patch("databricks_connector.google_auth.get_host", return_value="host.com"), \
+         patch("databricks_connector.google_auth._get_oidc_endpoints", return_value=endpoints), \
+         patch("databricks_connector.google_auth._headless_oauth", return_value="AUTH_CODE_123"), \
+         patch("databricks_connector.google_auth._exchange_code", return_value=mock_token_resp):
+        ga.reauth()
+
+    import json
+    saved = json.loads(token_cache.read_text())
+    assert saved["access_token"] == "dapi_headless"

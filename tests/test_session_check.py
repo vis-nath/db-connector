@@ -1,32 +1,31 @@
+# tests/test_session_check.py
+import json
+import time
 import pytest
-from unittest.mock import patch, MagicMock, AsyncMock
+from unittest.mock import patch
 from pathlib import Path
+import databricks_connector.auth as auth_module
 
 
-def test_check_session_returns_false_when_file_missing(tmp_path):
-    fake_session = tmp_path / "session.json"  # does not exist
-    with patch("databricks_connector.session_check.SESSION_FILE", fake_session):
+def test_check_session_returns_false_when_no_cache(tmp_path):
+    with patch.object(auth_module, "TOKEN_CACHE_FILE", tmp_path / "token-cache.json"):
         from databricks_connector.session_check import check_session
         assert check_session() is False
 
 
-def test_check_session_returns_true_when_session_info_ok(tmp_path):
-    fake_session = tmp_path / "session.json"
-    fake_session.write_text("{}")  # must exist for the file check
-
-    js_result = {"ok": True, "status": 200, "hasToken": True}
-
-    with patch("databricks_connector.session_check.SESSION_FILE", fake_session), \
-         patch("databricks_connector.session_check._check_async", new_callable=AsyncMock, return_value=True):
+def test_check_session_returns_true_when_token_fresh(tmp_path):
+    cache_file = tmp_path / "token-cache.json"
+    data = {"access_token": "tok", "refresh_token": "ref", "expires_at": time.time() + 7200}
+    cache_file.write_text(json.dumps(data))
+    with patch.object(auth_module, "TOKEN_CACHE_FILE", cache_file):
         from databricks_connector.session_check import check_session
         assert check_session() is True
 
 
-def test_check_session_returns_false_when_session_info_fails(tmp_path):
-    fake_session = tmp_path / "session.json"
-    fake_session.write_text("{}")
-
-    with patch("databricks_connector.session_check.SESSION_FILE", fake_session), \
-         patch("databricks_connector.session_check._check_async", new_callable=AsyncMock, return_value=False):
+def test_check_session_returns_false_when_token_expired(tmp_path):
+    cache_file = tmp_path / "token-cache.json"
+    data = {"access_token": "tok", "refresh_token": "", "expires_at": time.time() - 100}
+    cache_file.write_text(json.dumps(data))
+    with patch.object(auth_module, "TOKEN_CACHE_FILE", cache_file):
         from databricks_connector.session_check import check_session
         assert check_session() is False

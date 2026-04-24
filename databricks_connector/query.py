@@ -1,15 +1,17 @@
 """
 Execute Databricks SQL queries using the official databricks-sql-connector.
 
-Auth is delegated to the Databricks SDK's external-browser OAuth flow.
-Tokens are cached at ~/.databricks/token-cache.json and refreshed silently by the SDK.
+If DATABRICKS_TOKEN is set in ~/.databricks_connector/.env, API key auth is used.
+Otherwise, auth falls back to the Databricks SDK's external-browser OAuth flow.
 """
+
+from pathlib import Path
 
 import pandas as pd
 from databricks import sql
 from databricks.sql.exc import Error as _SqlError
 
-from .auth import AuthRequiredError, get_host, get_http_path
+from .auth import AuthRequiredError, get_host, get_http_path, get_token
 
 
 class DatabricksQueryError(Exception):
@@ -27,6 +29,23 @@ _AUTH_KEYWORDS = (
 def _is_auth_error(exc: Exception) -> bool:
     msg = str(exc).lower()
     return any(kw in msg for kw in _AUTH_KEYWORDS)
+
+
+def read_sql(path: str) -> str:
+    """
+    Read a .sql file and return its contents as a string.
+
+    Intended as a pre-processing step before passing the query to query():
+        df = query(read_sql("databricks_query/joined_data.sql"))
+
+    Raises:
+        FileNotFoundError: if the path does not exist
+        ValueError: if the file does not have a .sql extension
+    """
+    p = Path(path)
+    if p.suffix.lower() != ".sql":
+        raise ValueError(f"Expected a .sql file, got: {path}")
+    return p.read_text(encoding="utf-8")
 
 
 def query(sql_query: str, http_path: str | None = None) -> pd.DataFrame:
@@ -51,12 +70,15 @@ def query(sql_query: str, http_path: str | None = None) -> pd.DataFrame:
         http_path = get_http_path()
     hostname = host.replace("https://", "").replace("http://", "").rstrip("/")
 
+    token = get_token()
+    connect_kwargs = dict(server_hostname=hostname, http_path=http_path)
+    if token:
+        connect_kwargs["access_token"] = token
+    else:
+        connect_kwargs["auth_type"] = "external-browser"
+
     try:
-        with sql.connect(
-            server_hostname=hostname,
-            http_path=http_path,
-            auth_type="external-browser",
-        ) as conn:
+        with sql.connect(**connect_kwargs) as conn:
             with conn.cursor() as cursor:
                 cursor.execute(sql_query)
                 result = cursor.fetchall()
@@ -66,6 +88,7 @@ def query(sql_query: str, http_path: str | None = None) -> pd.DataFrame:
         if _is_auth_error(e):
             raise AuthRequiredError(
                 f"Autenticación fallida: {e}\n"
-                "Ejecuta: python3 ~/projects/databricks_connector/setup_auth.py"
+                "Verifica que DATABRICKS_TOKEN en ~/.databricks_connector/.env sea válido,\n"
+                "o ejecuta: python3 ~/projects/databricks_connector/setup_auth.py"
             ) from e
         raise DatabricksQueryError(str(e)) from e

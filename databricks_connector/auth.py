@@ -2,13 +2,18 @@
 Config loading for Databricks connector.
 
 Reads connection settings from ~/.databricks_connector/config.json.
-Auth tokens are managed entirely by the Databricks SDK (external-browser OAuth).
+If ~/.databricks_connector/.env contains DATABRICKS_TOKEN, API key auth is used.
+Otherwise, auth is handled by the Databricks SDK (external-browser OAuth).
 """
 
 import json
+import os
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 _CONFIG_FILE = Path.home() / ".databricks_connector" / "config.json"
+_ENV_FILE = Path.home() / ".databricks_connector" / ".env"
 
 
 class AuthRequiredError(Exception):
@@ -27,6 +32,13 @@ def _load_config() -> dict:
     if missing:
         raise RuntimeError(f"config.json le faltan campos: {missing}")
     return cfg
+
+
+def get_token() -> str | None:
+    """Return DATABRICKS_TOKEN from ~/.databricks_connector/.env, or None if not set."""
+    if _ENV_FILE.exists():
+        load_dotenv(_ENV_FILE, override=False)
+    return os.environ.get("DATABRICKS_TOKEN") or None
 
 
 def get_host() -> str:
